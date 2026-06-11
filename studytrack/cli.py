@@ -5,6 +5,11 @@ import typer
 app = typer.Typer(help="Track study sessions and review study progress.")
 
 
+@app.callback()
+def main() -> None:
+    """Track study sessions and review study progress."""
+
+
 @app.command()
 def version() -> None:
     """Show the installed StudyTrack version."""
