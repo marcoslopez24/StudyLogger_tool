@@ -1,6 +1,6 @@
 """Command-line interface for StudyTrack."""
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import typer
 
@@ -15,6 +15,47 @@ def format_duration(minutes: int) -> str:
         unit = "min" if minutes == 1 else "mins"
         return f"{minutes} {unit}"
     return f"{minutes / 60:.1f} hrs"
+
+
+def format_hours(minutes: int) -> str:
+    """Format minutes as hours with one decimal place."""
+    return f"{minutes / 60:.1f} hrs"
+
+
+def current_week_bounds(today: date | None = None) -> tuple[date, date]:
+    """Return Monday and Sunday for the current week."""
+    current_date = today or date.today()
+    week_start = current_date - timedelta(days=current_date.weekday())
+    week_end = week_start + timedelta(days=6)
+    return week_start, week_end
+
+
+def weekly_minutes_by_course(sessions: list[dict[str, object]]) -> dict[str, int]:
+    """Return this week's completed study minutes grouped by course."""
+    week_start, week_end = current_week_bounds()
+    totals: dict[str, int] = {}
+
+    for session in sessions:
+        session_date_text = session.get("date")
+        duration = session.get("duration_minutes")
+        course = session.get("course")
+
+        if not isinstance(session_date_text, str):
+            continue
+        if not isinstance(duration, int):
+            continue
+        if not isinstance(course, str):
+            continue
+
+        try:
+            session_date = date.fromisoformat(session_date_text)
+        except ValueError:
+            continue
+
+        if week_start <= session_date <= week_end:
+            totals[course] = totals.get(course, 0) + duration
+
+    return totals
 
 
 @app.callback()
@@ -86,3 +127,42 @@ def stop(
     save_data(data)
 
     typer.echo(f"Stopped {course}. Logged {format_duration(duration_minutes)}.")
+
+
+@app.command()
+def goal(course: str, hours: float) -> None:
+    """Set a weekly study goal for a course."""
+    if hours <= 0:
+        typer.echo("Goal hours must be greater than 0.")
+        raise typer.Exit(1)
+
+    data = load_data()
+    course_name = course.upper()
+    data["goals"][course_name] = hours
+    save_data(data)
+    typer.echo(f"Set weekly goal for {course_name}: {hours:.1f} hrs.")
+
+
+@app.command()
+def progress() -> None:
+    """Show progress toward weekly study goals."""
+    data = load_data()
+    goals = data["goals"]
+    if not goals:
+        typer.echo("No goals set yet. Run 'study goal COURSE HOURS' first.")
+        raise typer.Exit()
+
+    weekly_totals = weekly_minutes_by_course(data["sessions"])
+    typer.echo("Weekly Progress")
+    typer.echo()
+
+    for course in sorted(goals):
+        goal_hours = goals[course]
+        studied_minutes = weekly_totals.get(course, 0)
+        studied_hours = studied_minutes / 60
+        percent = min(100, round((studied_hours / goal_hours) * 100))
+        typer.echo(f"{course}: {studied_hours:.1f} / {goal_hours:.1f} hrs ({percent}%)")
+
+    total_minutes = sum(weekly_totals.get(course, 0) for course in goals)
+    typer.echo()
+    typer.echo(f"Total toward goals: {format_hours(total_minutes)}")
