@@ -3,7 +3,7 @@ name = "studytrack"
 version = "0.1.0"
 description = "A command-line study log for tracking sessions, weekly progress, and course totals."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "typer>=0.12.0",
 ]
