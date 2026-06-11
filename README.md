@@ -117,9 +117,3 @@ and easy to back up. By default, data is stored at:
 ```text
 ~/.studytrack/data.json
 ```
-
-For testing, you can use a temporary data file without changing your real log:
-
-```bash
-STUDYTRACK_DATA_FILE=/private/tmp/studytrack-test.json study start DSC40
-```
