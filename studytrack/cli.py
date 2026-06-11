@@ -30,26 +30,33 @@ def current_week_bounds(today: date | None = None) -> tuple[date, date]:
     return week_start, week_end
 
 
+def parse_session_date(session: dict[str, object]) -> date | None:
+    """Return a session date, or None when the saved value is invalid."""
+    session_date_text = session.get("date")
+    if not isinstance(session_date_text, str):
+        return None
+
+    try:
+        return date.fromisoformat(session_date_text)
+    except ValueError:
+        return None
+
+
 def weekly_minutes_by_course(sessions: list[dict[str, object]]) -> dict[str, int]:
     """Return this week's completed study minutes grouped by course."""
     week_start, week_end = current_week_bounds()
     totals: dict[str, int] = {}
 
     for session in sessions:
-        session_date_text = session.get("date")
+        session_date = parse_session_date(session)
         duration = session.get("duration_minutes")
         course = session.get("course")
 
-        if not isinstance(session_date_text, str):
+        if session_date is None:
             continue
         if not isinstance(duration, int):
             continue
         if not isinstance(course, str):
-            continue
-
-        try:
-            session_date = date.fromisoformat(session_date_text)
-        except ValueError:
             continue
 
         if week_start <= session_date <= week_end:
@@ -86,6 +93,53 @@ def print_totals_report(title: str, totals: dict[str, int]) -> None:
 
     typer.echo()
     typer.echo(f"Total: {format_hours(sum(totals.values()))}")
+
+
+def study_dates(sessions: list[dict[str, object]]) -> set[date]:
+    """Return unique dates with completed study sessions."""
+    return {
+        session_date
+        for session in sessions
+        if (session_date := parse_session_date(session)) is not None
+    }
+
+
+def current_streak(dates: set[date], today: date | None = None) -> int:
+    """Return the number of consecutive study days ending today or yesterday."""
+    if not dates:
+        return 0
+
+    current_date = today or date.today()
+    if current_date not in dates and current_date - timedelta(days=1) in dates:
+        current_date -= timedelta(days=1)
+
+    streak_count = 0
+    while current_date in dates:
+        streak_count += 1
+        current_date -= timedelta(days=1)
+
+    return streak_count
+
+
+def longest_streak(dates: set[date]) -> int:
+    """Return the longest run of consecutive study days."""
+    if not dates:
+        return 0
+
+    longest = 0
+    for study_date in dates:
+        if study_date - timedelta(days=1) in dates:
+            continue
+
+        streak_count = 1
+        next_date = study_date + timedelta(days=1)
+        while next_date in dates:
+            streak_count += 1
+            next_date += timedelta(days=1)
+
+        longest = max(longest, streak_count)
+
+    return longest
 
 
 @app.callback()
@@ -181,6 +235,57 @@ def stats() -> None:
         raise typer.Exit()
 
     print_totals_report("Lifetime Totals", lifetime_totals)
+
+
+@app.command()
+def history(
+    course: str,
+    limit: int = typer.Option(10, "--limit", "-l", help="Maximum sessions to show."),
+) -> None:
+    """Show recent sessions for a course."""
+    if limit <= 0:
+        typer.echo("History limit must be greater than 0.")
+        raise typer.Exit(1)
+
+    data = load_data()
+    course_name = course.upper()
+    sessions = [
+        session
+        for session in data["sessions"]
+        if session.get("course") == course_name and parse_session_date(session) is not None
+    ]
+    if not sessions:
+        typer.echo(f"No sessions logged for {course_name}.")
+        raise typer.Exit()
+
+    sessions.sort(key=lambda session: str(session.get("started_at", "")), reverse=True)
+
+    typer.echo(f"{course_name} History")
+    for session in sessions[:limit]:
+        session_date = parse_session_date(session)
+        duration = session.get("duration_minutes")
+        if session_date is None or not isinstance(duration, int):
+            continue
+
+        typer.echo()
+        typer.echo(f"{session_date.strftime('%b %d')} - {format_hours(duration)}")
+
+        note = session.get("note")
+        if isinstance(note, str) and note:
+            typer.echo(note)
+
+
+@app.command()
+def streak() -> None:
+    """Show current and longest study streaks."""
+    data = load_data()
+    dates = study_dates(data["sessions"])
+    if not dates:
+        typer.echo("No completed study sessions yet. Run 'study start COURSE' first.")
+        raise typer.Exit()
+
+    typer.echo(f"Current streak: {current_streak(dates)} days")
+    typer.echo(f"Longest streak: {longest_streak(dates)} days")
 
 
 @app.command()
