@@ -58,6 +58,36 @@ def weekly_minutes_by_course(sessions: list[dict[str, object]]) -> dict[str, int
     return totals
 
 
+def lifetime_minutes_by_course(sessions: list[dict[str, object]]) -> dict[str, int]:
+    """Return all completed study minutes grouped by course."""
+    totals: dict[str, int] = {}
+
+    for session in sessions:
+        duration = session.get("duration_minutes")
+        course = session.get("course")
+
+        if not isinstance(duration, int):
+            continue
+        if not isinstance(course, str):
+            continue
+
+        totals[course] = totals.get(course, 0) + duration
+
+    return totals
+
+
+def print_totals_report(title: str, totals: dict[str, int]) -> None:
+    """Print a course totals report."""
+    typer.echo(title)
+    typer.echo()
+
+    for course in sorted(totals):
+        typer.echo(f"{course}: {format_hours(totals[course])}")
+
+    typer.echo()
+    typer.echo(f"Total: {format_hours(sum(totals.values()))}")
+
+
 @app.callback()
 def main() -> None:
     """Track study sessions and review study progress."""
@@ -127,6 +157,30 @@ def stop(
     save_data(data)
 
     typer.echo(f"Stopped {course}. Logged {format_duration(duration_minutes)}.")
+
+
+@app.command()
+def week() -> None:
+    """Show study totals for the current week."""
+    data = load_data()
+    weekly_totals = weekly_minutes_by_course(data["sessions"])
+    if not weekly_totals:
+        typer.echo("No study sessions logged this week.")
+        raise typer.Exit()
+
+    print_totals_report("This Week", weekly_totals)
+
+
+@app.command()
+def stats() -> None:
+    """Show lifetime study totals by course."""
+    data = load_data()
+    lifetime_totals = lifetime_minutes_by_course(data["sessions"])
+    if not lifetime_totals:
+        typer.echo("No completed study sessions yet. Run 'study start COURSE' first.")
+        raise typer.Exit()
+
+    print_totals_report("Lifetime Totals", lifetime_totals)
 
 
 @app.command()
