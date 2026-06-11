@@ -1,8 +1,9 @@
 # StudyTrack
 
-StudyTrack is a command-line tool for students who want a simple way to track
-where their study time goes. It records study sessions by course, summarizes
-daily and weekly work, and helps compare actual study time against course goals.
+StudyTrack is a command-line tool that helps students track where their study time goes. 
+It records study sessions by course, generates daily and weekly summaries, and compares 
+actual study time against study goals. By providing a clear view of study habits, StudyTrack 
+helps students stay accountable and build more consistent routines.
 
 ## Usage
 
