@@ -1,6 +1,9 @@
 """Command-line interface for StudyTrack."""
 
+import csv
+import sys
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import typer
 
@@ -61,6 +64,28 @@ def weekly_minutes_by_course(sessions: list[dict[str, object]]) -> dict[str, int
 
         if week_start <= session_date <= week_end:
             totals[course] = totals.get(course, 0) + duration
+
+    return totals
+
+
+def today_minutes_by_course(sessions: list[dict[str, object]]) -> dict[str, int]:
+    """Return today's completed study minutes grouped by course."""
+    today = date.today()
+    totals: dict[str, int] = {}
+
+    for session in sessions:
+        session_date = parse_session_date(session)
+        duration = session.get("duration_minutes")
+        course = session.get("course")
+
+        if session_date != today:
+            continue
+        if not isinstance(duration, int):
+            continue
+        if not isinstance(course, str):
+            continue
+
+        totals[course] = totals.get(course, 0) + duration
 
     return totals
 
@@ -142,6 +167,31 @@ def longest_streak(dates: set[date]) -> int:
     return longest
 
 
+def completed_courses(sessions: list[dict[str, object]]) -> set[str]:
+    """Return courses with completed sessions."""
+    return {
+        course
+        for session in sessions
+        if isinstance(course := session.get("course"), str)
+    }
+
+
+def latest_session_index(sessions: list[dict[str, object]]) -> int | None:
+    """Return the index of the most recently started completed session."""
+    latest_index: int | None = None
+    latest_started_at = ""
+
+    for index, session in enumerate(sessions):
+        started_at = session.get("started_at")
+        if not isinstance(started_at, str):
+            continue
+        if latest_index is None or started_at > latest_started_at:
+            latest_index = index
+            latest_started_at = started_at
+
+    return latest_index
+
+
 @app.callback()
 def main() -> None:
     """Track study sessions and review study progress."""
@@ -214,6 +264,37 @@ def stop(
 
 
 @app.command()
+def status() -> None:
+    """Show the current active study session, if any."""
+    data = load_data()
+    active_session = data["active_session"]
+    if active_session is None:
+        typer.echo("No active study session.")
+        raise typer.Exit()
+
+    course = active_session.get("course", "unknown course")
+    started_at = datetime.fromisoformat(str(active_session["started_at"]))
+    now = datetime.now().astimezone()
+    elapsed_minutes = max(0, round((now - started_at).total_seconds() / 60))
+
+    typer.echo(f"Currently studying {course}")
+    typer.echo(f"Started: {started_at.strftime('%I:%M %p')}")
+    typer.echo(f"Elapsed: {format_duration(elapsed_minutes)}")
+
+
+@app.command()
+def today() -> None:
+    """Show study totals for today."""
+    data = load_data()
+    today_totals = today_minutes_by_course(data["sessions"])
+    if not today_totals:
+        typer.echo("No study sessions logged today.")
+        raise typer.Exit()
+
+    print_totals_report("Today", today_totals)
+
+
+@app.command()
 def week() -> None:
     """Show study totals for the current week."""
     data = load_data()
@@ -238,6 +319,28 @@ def stats() -> None:
 
 
 @app.command()
+def courses() -> None:
+    """List courses found in sessions and goals."""
+    data = load_data()
+    course_names = completed_courses(data["sessions"]) | set(data["goals"])
+    active_session = data["active_session"]
+    if active_session is not None and isinstance(
+        active_course := active_session.get("course"),
+        str,
+    ):
+        course_names.add(active_course)
+
+    if not course_names:
+        typer.echo("No courses found yet. Run 'study start COURSE' first.")
+        raise typer.Exit()
+
+    typer.echo("Courses")
+    typer.echo()
+    for course in sorted(course_names):
+        typer.echo(course)
+
+
+@app.command()
 def history(
     course: str,
     limit: int = typer.Option(10, "--limit", "-l", help="Maximum sessions to show."),
@@ -252,7 +355,8 @@ def history(
     sessions = [
         session
         for session in data["sessions"]
-        if session.get("course") == course_name and parse_session_date(session) is not None
+        if session.get("course") == course_name
+        and parse_session_date(session) is not None
     ]
     if not sessions:
         typer.echo(f"No sessions logged for {course_name}.")
@@ -286,6 +390,70 @@ def streak() -> None:
 
     typer.echo(f"Current streak: {current_streak(dates)} days")
     typer.echo(f"Longest streak: {longest_streak(dates)} days")
+
+
+@app.command("delete-last")
+def delete_last() -> None:
+    """Delete the most recently completed study session."""
+    data = load_data()
+    session_index = latest_session_index(data["sessions"])
+    if session_index is None:
+        typer.echo("No completed study sessions to delete.")
+        raise typer.Exit()
+
+    deleted_session = data["sessions"].pop(session_index)
+    save_data(data)
+
+    course = deleted_session.get("course", "unknown course")
+    duration = deleted_session.get("duration_minutes")
+    if isinstance(duration, int):
+        typer.echo(f"Deleted last session: {course}, {format_duration(duration)}.")
+    else:
+        typer.echo(f"Deleted last session: {course}.")
+
+
+@app.command()
+def export(
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="CSV file to write. Prints to the terminal by default.",
+    ),
+) -> None:
+    """Export completed sessions as CSV."""
+    data = load_data()
+    sessions = data["sessions"]
+    if not sessions:
+        typer.echo("No completed study sessions to export.")
+        raise typer.Exit()
+
+    fieldnames = [
+        "course",
+        "date",
+        "started_at",
+        "ended_at",
+        "duration_minutes",
+        "note",
+    ]
+
+    if output is None:
+        writer = csv.DictWriter(
+            sys.stdout,
+            fieldnames=fieldnames,
+            extrasaction="ignore",
+        )
+        writer.writeheader()
+        writer.writerows(sessions)
+        return
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(sessions)
+
+    typer.echo(f"Exported {len(sessions)} sessions to {output}.")
 
 
 @app.command()
