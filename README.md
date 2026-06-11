@@ -9,7 +9,7 @@ weekly work, and helps compare actual study time against course goals.
 Install from a GitHub repository with `uv`:
 
 ```bash
-uv add "git+https://github.com/<your-username>/studytrack.git"
+uv add "git+https://github.com/marcoslopez24/StudyLogger_tool.git"
 ```
 
 Show the installed version:
